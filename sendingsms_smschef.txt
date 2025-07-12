@@ -1,0 +1,62 @@
+
+import requests
+
+# your API secret from (Tools -> API Keys) page
+apiSecret = "ba104802e32907d9f6ebcd3a374df75b8de7fb96"
+
+message = {
+    "secret": apiSecret,
+    "mode": "devices",
+    "device": "00000000-0000-0000-5e88-a16e1e89428b",
+    "sim": 1,
+    "priority": 1,
+    "phone": "+918838466604",
+    "message": "a wild animal is detected nearby you ,,be carefull!"
+}
+
+r = requests.post(url = "https://www.cloud.smschef.com/api/send/sms", params = message)
+  
+# do something with response object
+result = r.json()
+print(result)
+
+
+
+
+import requests
+
+# Your API secret from (Tools -> API Keys) page
+apiSecret = "ba104802e32907d9f6ebcd3a374df75b8de7fb96"
+
+# Path to the file containing phone numbers
+phone_numbers_file = "phone_numbers.txt"
+
+# Function to read phone numbers from the file
+def get_phone_numbers(file_path):
+    with open(file_path, "r") as file:
+        phone_numbers = [line.strip() for line in file]
+    return phone_numbers
+
+# Define the message payload template
+def send_sms(api_secret, phone):
+    message = {
+        "secret": api_secret,
+        "mode": "devices",
+        "device": "00000000-0000-0000-5e88-a16e1e89428b",
+        "sim": 1,
+        "priority": 1,
+        "phone": phone,
+        "message": "A wild animal is detected nearby you, be careful!"
+    }
+    
+    # Send the message via API
+    response = requests.post(url="https://www.cloud.smschef.com/api/send/sms", params=message)
+    return response.json()
+
+# Read phone numbers from file and send SMS to each
+phone_numbers = get_phone_numbers(phone_numbers_file)
+
+# Send SMS to each phone number in the list
+for phone in phone_numbers:
+    result = send_sms(apiSecret, phone)
+    print(f"Sent to {phone}: {result}")

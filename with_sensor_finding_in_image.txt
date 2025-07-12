@@ -1,0 +1,105 @@
+import RPi.GPIO as GPIO
+import time
+
+import torch
+from PIL import Image
+import matplotlib.pyplot as plt
+import numpy as np
+# Load the pre-trained YOLOv5 model
+model = torch.hub.load('ultralytics/yolov5', 'yolov5s')
+
+# Set GPIO Mode
+GPIO.setmode(GPIO.BCM)
+
+# Define GPIO pins
+TRIG = 23
+ECHO = 24
+
+# Setup GPIO Pins
+GPIO.setup(TRIG, GPIO.OUT)
+GPIO.setup(ECHO, GPIO.IN)
+
+
+# Function to calculate distance from ultrasonic sensor
+def get_distance():
+    # Set Trigger to HIGH
+    GPIO.output(TRIG, True)
+
+    # Set Trigger after 0.01ms to LOW
+    time.sleep(0.00001)
+    GPIO.output(TRIG, False)
+
+    # Measure time of pulse from ECHO
+    start_time = time.time()
+    stop_time = time.time()
+
+    while GPIO.input(ECHO) == 0:
+        start_time = time.time()
+
+    while GPIO.input(ECHO) == 1:
+        stop_time = time.time()
+
+    # Time difference between start and stop
+    time_elapsed = stop_time - start_time
+    # Distance is (time * speed of sound) / 2
+    distance = (time_elapsed * 34300) / 2
+
+    return distance
+
+# Function to measure baseline distance
+def get_baseline_distance(samples=5):
+    total_distance = 0
+    for _ in range(samples):
+        total_distance += get_distance()
+        time.sleep(0.1)  # Short delay between measurements
+    return total_distance / samples  # Average baseline distance
+
+try:
+    # Measure the baseline distance with no animal/object present
+    print("Measuring baseline distance...")
+    baseline_distance = get_baseline_distance()
+    print(f"Baseline distance: {baseline_distance:.1f} cm")
+
+    # Define the distance change threshold for triggering the camera
+    change_threshold = 20.0  # Trigger if distance changes by more than 20 cm
+
+    while True:
+        dist = get_distance()
+        print(f"Current distance: {dist:.1f} cm")
+
+        # Check if the distance change exceeds the threshold
+        if abs(dist - baseline_distance) > change_threshold:
+            print("Significant change detected! Capturing image...")
+            # Load the image
+		img_path = 'path_to_your_image.jpg'  # Replace with your image path
+		img = Image.open(img_path)
+
+		# Perform inference (animal detection)
+		results = model(img)
+
+		# Print the results in the console
+		results.print()  # Display in console
+
+		# Save the results with bounding boxes
+		results.save()  # Save to 'runs/detect/exp' directory
+
+		# Visualize the results
+		results.show()  # Show the image with detections
+
+		# Optionally, access the detected labels
+		detected_objects = results.pandas().xyxy[0]  # pandas DataFrame containing the results
+		detected_animals = detected_objects[detected_objects['name'].isin(['dog', 'cat', 'bird', 'cow', 'elephant', 'bear', 'zebra', 'giraffe'])]
+
+		# Print detected animals
+		if not detected_animals.empty:
+   			 print("Animals detected in the image:")
+   			 print(detected_animals)
+		else:
+   			 print("No animals detected in the image.")
+
+        # Adding a short delay for stability
+        time.sleep(1)
+
+except KeyboardInterrupt:
+    print("Measurement stopped by User")
+    GPIO.cleanup()

@@ -1,0 +1,156 @@
+import RPi.GPIO as GPIO
+import cv2
+import time
+from datetime import datetime
+import os
+import sys
+import numpy as np
+import tensorflow as tf
+import requests
+
+# Setup GPIO for Ultrasonic Sensor
+TRIG = 23  # GPIO pin for TRIG
+ECHO = 24  # GPIO pin for ECHO
+
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(TRIG, GPIO.OUT)
+GPIO.setup(ECHO, GPIO.IN)
+
+# Initialize USB Webcam
+cap = cv2.VideoCapture(0)
+
+# Variables for base distance and threshold
+base_distance = None
+distance_threshold = 10  # Threshold for detecting a significant change in distance (in cm)
+last_capture_time = 0
+capture_interval = 10  # Minimum time between captures in seconds
+num_samples_for_base = 5  # Number of samples to calculate base distance
+
+# Define the classes (animal names)
+classes = ['Bear', 'Brown bear', 'Bull', 'Butterfly', 'Camel', 'Canary', 'Caterpillar', 'Cattle', 'Centipede', 'Cheetah', 
+           'Chicken', 'Crab', 'Crocodile', 'Deer', 'Duck', 'Eagle', 'Elephant', 'Fish', 'Fox', 'Frog', 'Giraffe', 
+           'Goat', 'Goldfish', 'Goose', 'Hamster', 'Harbor seal', 'Hedgehog', 'Hippopotamus', 'Horse', 'Jaguar', 
+           'Jellyfish', 'Kangaroo', 'Koala', 'Ladybug', 'Leopard', 'Lion', 'Lizard', 'Lynx', 'Magpie', 'Monkey', 
+           'Moths and butterflies', 'Mouse', 'Mule', 'Ostrich', 'Otter', 'Owl', 'Panda', 'Parrot', 'Penguin', 'Pig', 
+           'Polar bear', 'Rabbit', 'Raccoon', 'Raven', 'Red panda', 'Rhinoceros', 'Scorpion', 'Sea lion', 
+           'Sea turtle', 'Seahorse', 'Shark', 'Sheep', 'Shrimp', 'Snail', 'Snake', 'Sparrow', 'Spider', 'Squid', 
+           'Squirrel', 'Starfish', 'Swan', 'Tick', 'Tiger', 'Tortoise', 'Turkey', 'Turtle', 'Whale', 'Woodpecker', 
+           'Worm', 'Zebra']
+
+# Load the pre-trained model
+model = tf.keras.models.load_model("truemodel.keras")
+
+def take_picture():
+    ret, frame = cap.read()
+    if ret:
+        # Create a timestamp for the image name
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        image_name = f"image_{timestamp}.jpg"  # Unique image name
+        image_path = os.path.join(os.getcwd(), image_name)  # Save in current directory
+        cv2.imwrite(image_path, frame)
+        print(f"Captured: {image_path}")
+        return image_path
+    else:
+        print("Failed to capture image. Check the camera connection.")
+        return None
+
+def measure_distance():
+    GPIO.output(TRIG, True)
+    time.sleep(0.00001)  # Trigger duration
+    GPIO.output(TRIG, False)
+
+    pulse_start = time.time()
+    pulse_end = time.time()
+
+    while GPIO.input(ECHO) == 0:
+        pulse_start = time.time()
+    
+    while GPIO.input(ECHO) == 1:
+        pulse_end = time.time()
+
+    pulse_duration = pulse_end - pulse_start
+    distance = pulse_duration * 17150  # Convert to cm
+    return distance
+
+def calculate_base_distance():
+    samples = []
+    print("Calculating base distance using 5 samples...")
+    
+    for _ in range(num_samples_for_base):
+        distance = measure_distance()
+        print(f"Sample distance: {distance:.2f} cm")
+        samples.append(distance)
+        time.sleep(1)  # Small delay between samples
+
+    base_distance = sum(samples) / len(samples)
+    print(f"Base distance calculated: {base_distance:.2f} cm")
+    return base_distance
+
+def prepare(filepath):
+    IMG_SIZE = 224  # Image size expected by the model
+    img_array = cv2.imread(filepath, cv2.IMREAD_COLOR)  # Read the image as RGB (3 channels)
+    new_array = cv2.resize(img_array, (IMG_SIZE, IMG_SIZE))  # Resize the image to match model's input size
+    return new_array.reshape(-1, IMG_SIZE, IMG_SIZE, 3)  # Reshape for model input (batch, width, height, channels)
+
+def send_sms(animal_name):
+    apiSecret = "ba104802e32907d9f6ebcd3a374df75b8de7fb96"  # Your API secret
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # Current timestamp
+    sms_payload = {
+        "secret": apiSecret,
+        "mode": "devices",
+        "device": "00000000-0000-0000-5e88-a16e1e89428b",  # Your device ID
+        "sim": 1,
+        "priority": 1,
+        "phone": "+918790208965",  # Recipient's phone number
+        "message": f"Detected animal: {animal_name} at {timestamp}"  # Message with animal name and time
+    }
+    
+    r = requests.post(url="https://www.cloud.smschef.com/api/send/sms", params=sms_payload)
+    result = r.json()
+    print(result)
+
+def main():
+    global base_distance, last_capture_time
+    print("Press Ctrl+C to stop...")
+    
+    try:
+        # Calculate the base distance using the average of 5 samples
+        base_distance = calculate_base_distance()
+        
+        while True:
+            distance = measure_distance()
+            print(f"Current Distance: {distance:.2f} cm")
+            
+            # Check if the distance has changed significantly from the base distance
+            if abs(distance - base_distance) > distance_threshold:
+                current_time = time.time()
+
+                # Ensure that enough time has passed since the last capture
+                if current_time - last_capture_time > capture_interval:
+                    image_path = take_picture()
+                    if image_path:  # If image was captured successfully
+                        prediction = model.predict(prepare(image_path))
+                        predicted_index = np.argmax(prediction)
+                        predicted_animal = classes[predicted_index]
+
+                        # Send an SMS alert with the predicted animal name and time
+                        send_sms(predicted_animal)
+
+                    last_capture_time = current_time  # Update last capture time
+            
+            time.sleep(1)  # Adjust the sleep time as necessary
+            
+    except KeyboardInterrupt:
+        print("Process interrupted.")
+    
+    finally:
+        cap.release()
+        GPIO.cleanup()
+        print("Cleaned up GPIO and released camera.")
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        sys.exit(1)

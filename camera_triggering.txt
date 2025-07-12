@@ -1,0 +1,78 @@
+import RPi.GPIO as GPIO
+import time
+from picamera import PiCamera
+
+# Set GPIO Mode
+GPIO.setmode(GPIO.BCM)
+
+# Define GPIO pins
+TRIG = 23
+ECHO = 24
+
+# Setup GPIO Pins
+GPIO.setup(TRIG, GPIO.OUT)
+GPIO.setup(ECHO, GPIO.IN)
+
+# Initialize Pi Camera
+camera = PiCamera()
+
+# Function to calculate distance from ultrasonic sensor
+def get_distance():
+    # Set Trigger to HIGH
+    GPIO.output(TRIG, True)
+
+    # Set Trigger after 0.01ms to LOW
+    time.sleep(0.00001)
+    GPIO.output(TRIG, False)
+
+    # Measure time of pulse from ECHO
+    start_time = time.time()
+    stop_time = time.time()
+
+    while GPIO.input(ECHO) == 0:
+        start_time = time.time()
+
+    while GPIO.input(ECHO) == 1:
+        stop_time = time.time()
+
+    # Time difference between start and stop
+    time_elapsed = stop_time - start_time
+    # Distance is (time * speed of sound) / 2
+    distance = (time_elapsed * 34300) / 2
+
+    return distance
+
+# Function to measure baseline distance
+def get_baseline_distance(samples=5):
+    total_distance = 0
+    for _ in range(samples):
+        total_distance += get_distance()
+        time.sleep(0.1)  # Short delay between measurements
+    return total_distance / samples  # Average baseline distance
+
+try:
+    # Measure the baseline distance with no animal/object present
+    print("Measuring baseline distance...")
+    baseline_distance = get_baseline_distance()
+    print(f"Baseline distance: {baseline_distance:.1f} cm")
+
+    # Define the distance change threshold for triggering the camera
+    change_threshold = 20.0  # Trigger if distance changes by more than 20 cm
+
+    while True:
+        dist = get_distance()
+        print(f"Current distance: {dist:.1f} cm")
+
+        # Check if the distance change exceeds the threshold
+        if abs(dist - baseline_distance) > change_threshold:
+            print("Significant change detected! Capturing image...")
+            # Start camera to capture an image
+            camera.capture('/home/pi/animal_detected.jpg')
+            time.sleep(1)  # Adding delay between captures
+
+        # Adding a short delay for stability
+        time.sleep(1)
+
+except KeyboardInterrupt:
+    print("Measurement stopped by User")
+    GPIO.cleanup()
