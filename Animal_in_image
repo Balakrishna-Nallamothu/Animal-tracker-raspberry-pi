@@ -1,0 +1,34 @@
+import torch
+from PIL import Image
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Load the pre-trained YOLOv5 model
+model = torch.hub.load('ultralytics/yolov5', 'yolov5s')  # 'yolov5s' is the small model, fast and accurate
+
+# Load the image
+img_path = 'path_to_your_image.jpg'  # Replace with your image path
+img = Image.open(img_path)
+
+# Perform inference (animal detection)
+results = model(img)
+
+# Print the results in the console
+results.print()  # Display in console
+
+# Save the results with bounding boxes
+results.save()  # Save to 'runs/detect/exp' directory
+
+# Visualize the results
+results.show()  # Show the image with detections
+
+# Optionally, access the detected labels
+detected_objects = results.pandas().xyxy[0]  # pandas DataFrame containing the results
+detected_animals = detected_objects[detected_objects['name'].isin(['dog', 'cat', 'bird', 'cow', 'elephant', 'bear', 'zebra', 'giraffe'])]
+
+# Print detected animals
+if not detected_animals.empty:
+    print("Animals detected in the image:")
+    print(detected_animals)
+else:
+    print("No animals detected in the image.")
